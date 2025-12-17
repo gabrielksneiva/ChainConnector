@@ -6,4 +6,3 @@ func main() {
 	app := http.CreateFiberServer()
 	http.StartServer(app, ":3000")
 }
-
