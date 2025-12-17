@@ -17,6 +17,10 @@ func TestRun_Success(t *testing.T) {
 	})
 	defer httpPkg.ResetListenFunc()
 
+	// Call the StartServer which should invoke the mocked listen function.
+	app := httpPkg.CreateFiberServer()
+	httpPkg.StartServer(app, ":3000")
+
 	if !called {
 		t.Fatalf("expected listen func to be called")
 	}
@@ -29,6 +33,12 @@ func TestRun_ErrorReturned(t *testing.T) {
 		return testErr
 	})
 	defer httpPkg.ResetListenFunc()
+
+	// Call StartServerError and expect the error propagated.
+	err := httpPkg.StartServerError(httpPkg.CreateFiberServer(), ":3000")
+	if err != testErr {
+		t.Fatalf("expected error %v, got %v", testErr, err)
+	}
 }
 
 // simple error type to avoid importing errors package
