@@ -1,0 +1,194 @@
+name: Feature CI and Auto PR
+
+on:
+  push:
+    branches: ['feature/**']
+  workflow_dispatch:
+    inputs:
+      run_integration:
+        description: 'Run integration tests (requires docker)'
+        required: false
+        default: 'false'
+
+concurrency:
+  group: feature-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: write
+  issues: write
+  security-events: write
+
+env:
+  GOMODCACHE: ${{ github.workspace }}/.gocache/pkg/mod
+  GOCACHE: ${{ github.workspace }}/.gocache/go-build
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: off
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.24.0'
+          cache: false
+
+      - name: Prepare modules
+        run: |
+          go version
+          GOWORK=off go mod download
+          GOWORK=off go list -deps ./... >/dev/null
+        env:
+          GOWORK: off
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          # versão compatível com Go 1.24
+          version: v1.64.8
+          args: >
+            --timeout=10m
+            --out-format=colored-line-number
+            --tests=false
+
+  fmt-check:
+    name: Check formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: gofmt
+        run: |
+          bad=$(gofmt -l .)
+          [ -z "$bad" ] || (echo "$bad" && exit 1)
+
+  build-test:
+    name: Build & Unit Tests
+    needs: [lint, fmt-check]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.24.0'
+
+      - name: Cache Go
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.GOCACHE }}
+            ${{ env.GOMODCACHE }}
+          key: ${{ runner.os }}-go-1.24.0-${{ hashFiles('**/go.sum') }}
+
+      - name: Download deps
+        run: GOWORK=off go mod download
+        env:
+          GOWORK: off
+
+      - name: Run unit tests
+        run: |
+          mkdir -p testresults
+          go test ./... -v -covermode=atomic \
+            -coverprofile=testresults/coverage.out
+
+      - name: Check coverage threshold
+        run: |
+          if [ ! -f testresults/coverage.out ]; then
+            echo "coverage file missing: testresults/coverage.out"; exit 1
+          fi
+          TOTAL=$(go tool cover -func=testresults/coverage.out | awk '/total/ {gsub(/%/,"",$3); print $3}')
+          echo "Total coverage: ${TOTAL}%"
+          awk -v cov="$TOTAL" 'BEGIN{ if ((cov+0) < 90) { print "coverage below threshold: " cov "%"; exit 1 } }'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: testresults
+
+  codeql:
+    name: CodeQL
+    needs: build-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: go
+      - uses: github/codeql-action/autobuild@v3
+      - name: CodeQL Analyze
+        if: ${{ github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: github/codeql-action/analyze@v3
+
+  integration:
+    name: Integration Tests
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_integration == 'true'
+    needs: build-test
+    runs-on: ubuntu-latest
+    env:
+      RUN_INTEGRATION: ${{ github.event.inputs.run_integration }}
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ecs_test
+        ports: ['5432:5432']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v4
+        with:
+          go-version: '1.24.0'
+
+      - name: Run integration tests
+        run: |
+          go version
+          GOWORK=off go mod download
+          GOWORK=off go test ./internal/adapters/postgres ./internal/adapters/http -v -run Integration
+
+  create_pr:
+    name: Auto PR → develop
+    needs: [build-test, codeql]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GH_PAT }}
+          script: |
+            const { owner, repo } = context.repo
+            const branch = context.ref.replace('refs/heads/', '')
+
+            if (!branch.startsWith('feature/')) return
+            if (branch === 'develop') return
+
+            const prs = await github.rest.pulls.list({
+              owner,
+              repo,
+              head: `${owner}:${branch}`,
+              base: 'develop'
+            })
+
+            if (prs.data.length > 0) {
+              console.log('PR already exists')
+              return
+            }
+
+            await github.rest.pulls.create({
+              owner,
+              repo,
+              head: branch,
+              base: 'develop',
+              title: `Auto PR: ${branch} → develop`,
+              body: 'PR criado automaticamente após CI passar.'
+            })
+
+
