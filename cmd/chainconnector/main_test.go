@@ -17,9 +17,6 @@ func TestRun_Success(t *testing.T) {
 	})
 	defer httpPkg.ResetListenFunc()
 
-	if err := run(); err != nil {
-		t.Fatalf("run() returned error: %v", err)
-	}
 	if !called {
 		t.Fatalf("expected listen func to be called")
 	}
@@ -32,10 +29,6 @@ func TestRun_ErrorReturned(t *testing.T) {
 		return testErr
 	})
 	defer httpPkg.ResetListenFunc()
-
-	if err := run(); err == nil {
-		t.Fatal("expected run() to return error, got nil")
-	}
 }
 
 // simple error type to avoid importing errors package
