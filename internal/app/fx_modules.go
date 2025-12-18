@@ -3,6 +3,7 @@ package app
 import (
 	"ChainConnector/internal/adapters/eventbus"
 	"ChainConnector/internal/adapters/http"
+	"ChainConnector/internal/adapters/postgres"
 	"ChainConnector/internal/domain/entity"
 	"ChainConnector/internal/domain/ports"
 	"ChainConnector/internal/domain/service"
@@ -18,6 +19,7 @@ var Modules = fx.Options(
 		newZapLogger,
 		service.NewTransactionService,
 		func() ports.EventBus { return eventbus.NewInMemoryBus(4, 1024) },
+		postgres.NewInMemoryTxRepository,
 		http.NewFiberServer,
 	),
 	fx.Invoke(func(lc fx.Lifecycle, h *http.FiberServer) {
