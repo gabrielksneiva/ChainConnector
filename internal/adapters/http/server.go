@@ -1,6 +1,7 @@
 package http
 
 import (
+	"ChainConnector/internal/domain/service"
 	"context"
 
 	"github.com/gofiber/fiber/v2"
@@ -19,6 +20,7 @@ type fiberApp interface {
 type FiberServer struct {
 	app    fiberApp
 	addr   string
+	txSvc  *service.TransactionService
 	logger *zap.Logger
 }
 
@@ -50,9 +52,9 @@ func (s *FiberServer) Start(lc fx.Lifecycle) {
 
 // NewFiberServer constructs a FiberServer for fx. It accepts a zap.Logger
 // and sets a default address. Modify to read config when available.
-func NewFiberServer(logger *zap.Logger) *FiberServer {
+func NewFiberServer(logger *zap.Logger, txSvc *service.TransactionService) *FiberServer {
 	app := CreateFiberServer()
-	return &FiberServer{app: app, addr: ":3000", logger: logger}
+	return &FiberServer{app: app, addr: ":3000", logger: logger, txSvc: txSvc}
 }
 
 func CreateFiberServer() *fiber.App {

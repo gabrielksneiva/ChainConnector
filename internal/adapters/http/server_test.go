@@ -1,6 +1,7 @@
 package http
 
 import (
+	"ChainConnector/internal/domain/service"
 	"context"
 	"net/http"
 	"testing"
@@ -40,7 +41,8 @@ func TestFiberServer_StartRegistersHooks(t *testing.T) {
 	// is exercised indirectly via integration. Skip direct invocation
 	// here to avoid lifecycle initialization complexity in unit tests.
 	logger := zap.NewNop()
-	s := NewFiberServer(logger)
+	txSvc := &service.TransactionService{}
+	s := NewFiberServer(logger, txSvc)
 
 	// Use zero-value lifecycle; Start should handle nil Append without panicking.
 	var lc fx.Lifecycle
@@ -49,7 +51,8 @@ func TestFiberServer_StartRegistersHooks(t *testing.T) {
 
 func TestNewFiberServer_ConstructsWithLogger(t *testing.T) {
 	logger := zap.NewNop()
-	s := NewFiberServer(logger)
+	txSvc := &service.TransactionService{}
+	s := NewFiberServer(logger, txSvc)
 	if s == nil || s.app == nil {
 		t.Fatalf("expected non-nil FiberServer and app")
 	}
@@ -60,7 +63,8 @@ func TestNewFiberServer_ConstructsWithLogger(t *testing.T) {
 
 func TestFiberServer_HookExecution(t *testing.T) {
 	logger := zap.NewNop()
-	s := NewFiberServer(logger)
+	txSvc := &service.TransactionService{}
+	s := NewFiberServer(logger, txSvc)
 	// inject fake app to avoid real network Listen
 	s.app = &fakeApp{}
 
