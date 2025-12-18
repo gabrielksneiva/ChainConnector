@@ -1,8 +1,11 @@
 package main
 
-import "ChainConnector/internal/adapters/http"
+import (
+	"ChainConnector/internal/app"
+
+	"go.uber.org/fx"
+)
 
 func main() {
-	app := http.CreateFiberServer()
-	http.StartServer(app, ":3000")
+	fx.New(app.Modules).Run()
 }

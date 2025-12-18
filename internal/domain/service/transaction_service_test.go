@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"go.uber.org/zap"
 )
 
 type mockRepo struct {
@@ -12,6 +14,25 @@ type mockRepo struct {
 	byID    map[string]*entity.Transaction
 	byHash  map[string]*entity.Transaction
 	updated map[string][]interface{}
+}
+
+// repoErr is a test repo implementation that returns an error on Save.
+type repoErr struct{}
+
+func (r *repoErr) Save(ctx context.Context, tx *entity.Transaction) error {
+	return errors.New("save failed")
+}
+func (r *repoErr) UpdateStatus(ctx context.Context, txID string, status entity.TxStatus, updates map[string]interface{}) error {
+	return nil
+}
+func (r *repoErr) FindByID(ctx context.Context, id string) (*entity.Transaction, error) {
+	return nil, nil
+}
+func (r *repoErr) FindByHash(ctx context.Context, hash string) (*entity.Transaction, error) {
+	return nil, nil
+}
+func (r *repoErr) ListPending(ctx context.Context, limit int) ([]*entity.Transaction, error) {
+	return nil, nil
 }
 
 func (m *mockRepo) Save(ctx context.Context, tx *entity.Transaction) error {
@@ -64,7 +85,7 @@ func (m *mockRepo) ListPending(ctx context.Context, limit int) ([]*entity.Transa
 }
 
 func TestCreateTransaction_nil(t *testing.T) {
-	svc := NewTransactionService(&mockRepo{})
+	svc := NewTransactionService(&mockRepo{}, zap.NewNop())
 	if err := svc.CreateTransaction(context.Background(), nil); err == nil {
 		t.Fatal("expected error for nil tx")
 	}
@@ -72,7 +93,7 @@ func TestCreateTransaction_nil(t *testing.T) {
 
 func TestCreateTransaction_success(t *testing.T) {
 	repo := &mockRepo{byID: map[string]*entity.Transaction{}}
-	svc := NewTransactionService(repo)
+	svc := NewTransactionService(repo, zap.NewNop())
 
 	tx := &entity.Transaction{ID: "t1"}
 	if err := svc.CreateTransaction(context.Background(), tx); err != nil {
@@ -84,4 +105,12 @@ func TestCreateTransaction_success(t *testing.T) {
 	// if len(pub.published) == 0 {
 	// 	t.Fatalf("expected event published")
 	// }
+}
+
+func TestCreateTransaction_SaveError(t *testing.T) {
+	svc := NewTransactionService(&repoErr{}, zap.NewNop())
+	tx := &entity.Transaction{ID: "t2"}
+	if err := svc.CreateTransaction(context.Background(), tx); err == nil {
+		t.Fatalf("expected save error propagated")
+	}
 }
