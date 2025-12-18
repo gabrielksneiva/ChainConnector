@@ -1,79 +1,70 @@
 package http
 
 import (
-	"log"
+	"context"
 
 	"github.com/gofiber/fiber/v2"
+	"go.uber.org/fx"
+	"go.uber.org/zap"
 )
+
+// FiberServer is an fx-friendly wrapper that contains the Fiber app and
+// lifecycle/start logic. It is provided to the fx app via a constructor
+// (NewFiberServer) and its Start method registers lifecycle hooks.
+type fiberApp interface {
+	Listen(string) error
+	Shutdown() error
+}
+
+type FiberServer struct {
+	app    fiberApp
+	addr   string
+	logger *zap.Logger
+}
+
+// Start registers the lifecycle hooks to start and stop the Fiber server.
+func (s *FiberServer) Start(lc fx.Lifecycle) {
+	if lc == nil {
+		return
+	}
+
+	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			go func() {
+				if err := s.app.Listen(s.addr); err != nil {
+					s.logger.Error("fiber start failed", zap.Error(err))
+				}
+			}()
+			s.logger.Info("fiber server started", zap.String("addr", s.addr))
+			return nil
+		},
+		OnStop: func(ctx context.Context) error {
+			if err := s.app.Shutdown(); err != nil {
+				s.logger.Error("fiber shutdown failed", zap.Error(err))
+			}
+			s.logger.Info("fiber server stopped")
+			return nil
+		},
+	})
+}
+
+// NewFiberServer constructs a FiberServer for fx. It accepts a zap.Logger
+// and sets a default address. Modify to read config when available.
+func NewFiberServer(logger *zap.Logger) *FiberServer {
+	app := CreateFiberServer()
+	return &FiberServer{app: app, addr: ":3000", logger: logger}
+}
 
 func CreateFiberServer() *fiber.App {
 	app := fiber.New()
 
-	app.Get("/", func(c *fiber.Ctx) error {
-		return c.SendString("criando servidor fiber")
-	})
-
-	setupHealthcheckRoute(app)
+	// ROUTES
+	app.Get("/health", handlerHeatlCheck)
 
 	return app
 }
 
-func StartServer(app *fiber.App, port string) {
-	logServerStart(port)
-	if err := listenFunc(app, port); err != nil {
-		log.Fatal(err)
-	}
-}
-
-func StartServerError(app *fiber.App, port string) error {
-	logServerStart(port)
-	return listenFunc(app, port)
-}
-
-func logServerStart(port string) {
-	log.Println("Servidor rodando na porta " + port + "...")
-}
-
-// listenFunc is the function used to start the fiber app. It is replaceable
-// in tests via SetListenFunc / ResetListenFunc.
-var listenFunc = defaultListenFunc
-
-// defaultListenImpl is the underlying implementation used by defaultListenFunc.
-// Tests can replace this via SetDefaultListenImpl to avoid calling the real
-// `app.Listen` which would block.
-var defaultListenImpl = func(app *fiber.App, port string) error {
-	return app.Listen(port)
-}
-
-func defaultListenFunc(app *fiber.App, port string) error {
-	return defaultListenImpl(app, port)
-}
-
-// SetDefaultListenImpl replaces the internal implementation used by
-// defaultListenFunc. Only intended for tests.
-func SetDefaultListenImpl(f func(*fiber.App, string) error) {
-	defaultListenImpl = f
-}
-
-// ResetDefaultListenImpl restores the original implementation.
-func ResetDefaultListenImpl() {
-	defaultListenImpl = func(app *fiber.App, port string) error {
-		return app.Listen(port)
-	}
-}
-
-// SetListenFunc sets a custom listen function (for tests).
-func SetListenFunc(f func(*fiber.App, string) error) {
-	listenFunc = f
-}
-
-// ResetListenFunc restores the default listen function.
-func ResetListenFunc() {
-	listenFunc = defaultListenFunc
-}
-
-func setupHealthcheckRoute(app *fiber.App) {
-	app.Get("/healthz", func(c *fiber.Ctx) error {
-		return c.SendString("OK")
-	})
+// HANDLERS
+func handlerHeatlCheck(c *fiber.Ctx) error {
+	return c.SendString("OK")
 }

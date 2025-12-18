@@ -5,16 +5,19 @@ import (
 	"ChainConnector/internal/domain/ports"
 	"context"
 	"errors"
-	"fmt"
+
+	"go.uber.org/zap"
 )
 
 type TransactionService struct {
-	repo ports.TxRepositoryPort
+	repo   ports.TxRepositoryPort
+	logger *zap.Logger
 }
 
-func NewTransactionService(repo ports.TxRepositoryPort) *TransactionService {
+func NewTransactionService(repo ports.TxRepositoryPort, logger *zap.Logger) *TransactionService {
 	return &TransactionService{
-		repo: repo,
+		repo:   repo,
+		logger: logger,
 	}
 }
 
@@ -30,7 +33,7 @@ func (s *TransactionService) CreateTransaction(ctx context.Context, tx *entity.T
 	}
 
 	// TODO: Add logger when fx provider is set up
-	fmt.Printf("Transaction created with ID %s and hash %s\n", tx.ID, tx.TxHash)
+	s.logger.Sugar().Infof("Transaction created with ID %s and hash %s\n", tx.ID, tx.TxHash)
 
 	return nil
 }
