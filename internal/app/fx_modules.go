@@ -4,6 +4,7 @@ import (
 	"ChainConnector/internal/adapters/eventbus"
 	"ChainConnector/internal/adapters/http"
 	"ChainConnector/internal/adapters/postgres"
+	"ChainConnector/internal/adapters/rpc"
 	"ChainConnector/internal/domain/entity"
 	"ChainConnector/internal/domain/ports"
 	"ChainConnector/internal/domain/service"
@@ -21,6 +22,7 @@ var Modules = fx.Options(
 		func() ports.EventBus { return eventbus.NewInMemoryBus(4, 1024) },
 		postgres.NewInMemoryTxRepository,
 		http.NewFiberServer,
+		providerETHRPC,
 	),
 	fx.Invoke(func(lc fx.Lifecycle, h *http.FiberServer) {
 		h.Start(lc)
@@ -54,4 +56,9 @@ var Modules = fx.Options(
 
 func newZapLogger() (*zap.Logger, error) {
 	return zap.NewProduction()
+}
+
+func providerETHRPC(logger *zap.Logger) *rpc.ETHRPC {
+	eth := rpc.NewETHRPC(logger, nil)
+	return eth
 }
