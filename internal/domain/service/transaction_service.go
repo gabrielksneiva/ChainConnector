@@ -32,7 +32,6 @@ func (s *TransactionService) CreateTransaction(ctx context.Context, tx *entity.T
 		return err
 	}
 
-	// TODO: Add logger when fx provider is set up
 	s.logger.Sugar().Infof("Transaction created with ID %s and hash %s\n", tx.ID, tx.TxHash)
 
 	return nil
