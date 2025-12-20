@@ -141,7 +141,9 @@ func TestRPCErrorEnvelopeAndInvalidJSON(t *testing.T) {
 
 	// Server that returns invalid JSON
 	srvBad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("not json"))
+		if _, err := w.Write([]byte("not json")); err != nil {
+			t.Fatalf("failed to write response: %v", err)
+		}
 	}))
 	defer srvBad.Close()
 	eth.url = srvBad.URL
