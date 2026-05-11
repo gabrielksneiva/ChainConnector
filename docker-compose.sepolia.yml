@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  sepolia-node:
+    image: ethereum/client-go:v1.14.0
+    container_name: chainconnector-sepolia-local
+    ports:
+      - "8545:8545"
+      - "30303:30303"
+    volumes:
+      - sepolia-data:/root/.ethereum
+    command: >
+      --sepolia
+      --http
+      --http.addr 0.0.0.0
+      --http.port 8545
+      --http.api eth,net,web3,txpool,debug
+      --http.corsdomain "*"
+      --http.vhosts "*"
+      --syncmode snap
+      --cache 1024
+      --maxpeers 50
+      --datadir /root/.ethereum
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8545", "--silent", "--show-error"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - sepolia-net
+
+volumes:
+  sepolia-data:
+    driver: local
+
+networks:
+  sepolia-net:
+    driver: bridge

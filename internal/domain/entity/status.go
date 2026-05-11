@@ -30,3 +30,21 @@ func (s TxStatus) String() string {
 		return "unknown"
 	}
 }
+func ParseTxStatus(value string) TxStatus {
+	switch value {
+	case "pending":
+		return TxStatusPending
+	case "signed":
+		return TxStatusSigned
+	case "sent":
+		return TxStatusSent
+	case "confirmed":
+		return TxStatusConfirmed
+	case "failed":
+		return TxStatusFailed
+	case "cancelled":
+		return TxStatusCancelled
+	default:
+		return TxStatusUnknown
+	}
+}

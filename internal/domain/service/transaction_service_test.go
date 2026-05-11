@@ -4,6 +4,7 @@ import (
 	"ChainConnector/internal/domain/entity"
 	"context"
 	"errors"
+	"math/big"
 	"testing"
 
 	"go.uber.org/zap"
@@ -33,6 +34,22 @@ func (r *repoErr) FindByHash(ctx context.Context, hash string) (*entity.Transact
 }
 func (r *repoErr) ListPending(ctx context.Context, limit int) ([]*entity.Transaction, error) {
 	return nil, nil
+}
+
+func (r *repoErr) AddInterestAddress(ctx context.Context, address string, chain string) error {
+	return nil
+}
+
+func (r *repoErr) GetInterestAddresses(ctx context.Context, chain string) ([]string, error) {
+	return []string{}, nil
+}
+
+func (r *repoErr) GetBalance(ctx context.Context, address string, chain string) (*big.Int, error) {
+	return big.NewInt(0), nil
+}
+
+func (r *repoErr) UpdateBalance(ctx context.Context, address string, chain string, amount *big.Int) error {
+	return nil
 }
 
 func (m *mockRepo) Save(ctx context.Context, tx *entity.Transaction) error {
@@ -84,6 +101,22 @@ func (m *mockRepo) ListPending(ctx context.Context, limit int) ([]*entity.Transa
 	return out, nil
 }
 
+func (m *mockRepo) AddInterestAddress(ctx context.Context, address string, chain string) error {
+	return nil
+}
+
+func (m *mockRepo) GetInterestAddresses(ctx context.Context, chain string) ([]string, error) {
+	return []string{}, nil
+}
+
+func (m *mockRepo) GetBalance(ctx context.Context, address string, chain string) (*big.Int, error) {
+	return big.NewInt(0), nil
+}
+
+func (m *mockRepo) UpdateBalance(ctx context.Context, address string, chain string, amount *big.Int) error {
+	return nil
+}
+
 func TestCreateTransaction_nil(t *testing.T) {
 	svc := NewTransactionService(&mockRepo{}, zap.NewNop())
 	if err := svc.CreateTransaction(context.Background(), nil); err == nil {
@@ -95,7 +128,18 @@ func TestCreateTransaction_success(t *testing.T) {
 	repo := &mockRepo{byID: map[string]*entity.Transaction{}}
 	svc := NewTransactionService(repo, zap.NewNop())
 
-	tx := &entity.Transaction{ID: "t1"}
+	amount := big.NewInt(1000)
+	gasPrice := big.NewInt(100)
+	to := "0xabc123"
+	tx := &entity.Transaction{
+		ID:       "t1",
+		From:     "0xfrom",
+		To:       &to,
+		Chain:    "sepolia",
+		Value:    amount,
+		Gas:      21000,
+		GasPrice: gasPrice,
+	}
 	if err := svc.CreateTransaction(context.Background(), tx); err != nil {
 		t.Fatal(err)
 	}

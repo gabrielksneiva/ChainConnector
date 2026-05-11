@@ -23,6 +23,70 @@ go run ./cmd/chainconnector
 make cover
 ```
 
+- Start a local stack with Docker Compose:
+
+```bash
+docker compose up -d --build
+```
+
+> If you are still using legacy Docker Compose, you can also run:
+>
+> ```bash
+docker-compose up -d --build
+> ```
+
+This repository includes a local Sepolia-compatible node powered by Anvil inside `docker-compose.yml`. The backend is configured to use `SEPOLIA_RPC_URL` and `ETH_RPC_URL` against the local Anvil node for development.
+
+Alternatively, to connect against a real Sepolia client, use:
+
+```bash
+docker compose -f docker-compose.sepolia.yml up -d
+```
+
+## Frontend
+
+The project includes a sophisticated React frontend for managing the ChainConnector system:
+
+### Development Setup
+
+**Requirements**: Node.js 18+ and npm
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The frontend will be available at `http://localhost:5173` with API proxy to `http://localhost:3000`.
+
+### Production with Docker
+
+```bash
+docker-compose up --build
+```
+
+Frontend available at `http://localhost:8080`, API proxy configured automatically.
+
+### Features
+
+- **Transaction Management**: Create, list, and monitor transaction status
+- **Balance Control**: Query and update offchain balances
+- **Address Monitoring**: Register interests and view blockchain logs
+- **Real-time Updates**: Automatic polling for status changes
+
+### Compatibility Notes
+
+- **Backend**: Go 1.19+ (tested with Go 1.21)
+- **Frontend**: Node.js 18+ required for development (React 18 + Vite 5)
+- **Database**: PostgreSQL 13+
+- **Blockchain**: Ethereum-compatible RPC (Sepolia, Mainnet, etc.)
+
+For development environments with older Node.js versions, use Docker for frontend builds:
+
+```bash
+docker build -t chainconnector-frontend ./frontend
+```
+
 ## Project Structure
 
 - `cmd/chainconnector` — application entrypoint.

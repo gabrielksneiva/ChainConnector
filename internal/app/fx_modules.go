@@ -3,8 +3,10 @@ package app
 import (
 	"ChainConnector/internal/adapters/eventbus"
 	"ChainConnector/internal/adapters/http"
+	"ChainConnector/internal/adapters/monitor"
 	"ChainConnector/internal/adapters/postgres"
 	"ChainConnector/internal/adapters/rpc"
+	"ChainConnector/internal/config"
 	"ChainConnector/internal/domain/entity"
 	"ChainConnector/internal/domain/ports"
 	"ChainConnector/internal/domain/service"
@@ -17,12 +19,16 @@ import (
 
 var Modules = fx.Options(
 	fx.Provide(
+		config.Load,
 		newZapLogger,
 		service.NewTransactionService,
 		func() ports.EventBus { return eventbus.NewInMemoryBus(4, 1024) },
-		postgres.NewInMemoryTxRepository,
+		providerPostgresTxRepository,
+		monitor.NewInterestStore,
+		monitor.NewBloomFilterCache,
 		http.NewFiberServer,
 		providerETHRPC,
+		monitor.NewMonitorService,
 	),
 	fx.Invoke(func(lc fx.Lifecycle, h *http.FiberServer) {
 		h.Start(lc)
@@ -52,13 +58,28 @@ var Modules = fx.Options(
 			},
 		})
 	}),
+	fx.Invoke(func(lc fx.Lifecycle, ms *monitor.MonitorService) {
+		lc.Append(fx.Hook{
+			OnStart: func(ctx context.Context) error {
+				ms.Start(ctx)
+				return nil
+			},
+		})
+	}),
 )
 
 func newZapLogger() (*zap.Logger, error) {
 	return zap.NewProduction()
 }
 
-func providerETHRPC(logger *zap.Logger) *rpc.ETHRPC {
-	eth := rpc.NewETHRPC(logger, nil)
+func providerETHRPC(logger *zap.Logger, cfg *config.Config) ports.BlockchainPort {
+	eth := rpc.NewETHRPCWithURLs(logger, nil, map[string]string{
+		"eth":     cfg.EthRPCURL,
+		"sepolia": cfg.SepoliaRPCURL,
+	})
 	return eth
+}
+
+func providerPostgresTxRepository(logger *zap.Logger, cfg *config.Config) (ports.TxRepositoryPort, error) {
+	return postgres.NewPostgresTxRepository(cfg.DatabaseURL, logger)
 }

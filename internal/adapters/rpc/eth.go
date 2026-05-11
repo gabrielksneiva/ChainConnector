@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -18,18 +19,49 @@ import (
 type ETHRPC struct {
 	httpClient *http.Client
 	logger     *zap.Logger
-	url        string
+	urls       map[string]string
+	defaultURL string
 }
 
 // NewETHRPC constructs an ETHRPC. The httpClient parameter is optional; if nil,
-// a default client with timeout is used.
+// a default client with timeout is used. The default RPC endpoint is Sepolia.
 func NewETHRPC(logger *zap.Logger, httpClient *http.Client) *ETHRPC {
-	url := "https://ethereum-sepolia-rpc.publicnode.com"
+	return NewETHRPCWithURLs(logger, httpClient, map[string]string{"sepolia": "https://ethereum-sepolia-rpc.publicnode.com"})
+}
+
+// NewETHRPCWithURL constructs an ETHRPC with an explicit URL for Sepolia.
+func NewETHRPCWithURL(logger *zap.Logger, httpClient *http.Client, url string) *ETHRPC {
+	return NewETHRPCWithURLs(logger, httpClient, map[string]string{"sepolia": url})
+}
+
+// NewETHRPCWithURLs constructs an ETHRPC with explicit endpoint URLs per chain.
+func NewETHRPCWithURLs(logger *zap.Logger, httpClient *http.Client, urls map[string]string) *ETHRPC {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 10 * time.Second}
 	}
+	if urls == nil {
+		urls = map[string]string{"sepolia": "https://ethereum-sepolia-rpc.publicnode.com"}
+	}
+	defaultURL := urls["sepolia"]
+	if defaultURL == "" {
+		for _, u := range urls {
+			if u != "" {
+				defaultURL = u
+				break
+			}
+		}
+	}
+	if defaultURL == "" {
+		defaultURL = "https://ethereum-sepolia-rpc.publicnode.com"
+	}
+
+	normalized := make(map[string]string, len(urls))
+	for chain, u := range urls {
+		normalized[strings.ToLower(chain)] = u
+	}
 	return &ETHRPC{
-		url:        url,
+		urls:       normalized,
+		defaultURL: defaultURL,
 		httpClient: httpClient,
 		logger:     logger,
 	}
@@ -37,12 +69,12 @@ func NewETHRPC(logger *zap.Logger, httpClient *http.Client) *ETHRPC {
 
 func (e *ETHRPC) SendRawTransaction(ctx context.Context, chain string, signedTx []byte) (string, error) {
 	hexTx := "0x" + hex.EncodeToString(signedTx)
-	return e.SendRawTransactionHex(ctx, "", hexTx)
+	return e.SendRawTransactionHex(ctx, chain, hexTx)
 }
 
 func (e *ETHRPC) SendRawTransactionHex(ctx context.Context, chain string, signedTxHex string) (string, error) {
 	var res string
-	if err := e.rpcCall(ctx, "eth_sendRawTransaction", []interface{}{signedTxHex}, &res); err != nil {
+	if err := e.rpcCall(ctx, chain, "eth_sendRawTransaction", []interface{}{signedTxHex}, &res); err != nil {
 		return "", err
 	}
 	return res, nil
@@ -50,7 +82,7 @@ func (e *ETHRPC) SendRawTransactionHex(ctx context.Context, chain string, signed
 
 func (e *ETHRPC) GetBalance(ctx context.Context, address string) (*big.Int, error) {
 	var res string
-	if err := e.rpcCall(ctx, "eth_getBalance", []interface{}{address, "latest"}, &res); err != nil {
+	if err := e.rpcCall(ctx, "", "eth_getBalance", []interface{}{address, "latest"}, &res); err != nil {
 		return nil, err
 	}
 	return hexToBigInt(res)
@@ -58,7 +90,7 @@ func (e *ETHRPC) GetBalance(ctx context.Context, address string) (*big.Int, erro
 
 func (e *ETHRPC) GetNonce(ctx context.Context, address string) (uint64, error) {
 	var res string
-	if err := e.rpcCall(ctx, "eth_getTransactionCount", []interface{}{address, "pending"}, &res); err != nil {
+	if err := e.rpcCall(ctx, "", "eth_getTransactionCount", []interface{}{address, "pending"}, &res); err != nil {
 		return 0, err
 	}
 	return hexToUint64(res)
@@ -66,7 +98,7 @@ func (e *ETHRPC) GetNonce(ctx context.Context, address string) (uint64, error) {
 
 func (e *ETHRPC) GetBlockNumber(ctx context.Context) (uint64, error) {
 	var res string
-	if err := e.rpcCall(ctx, "eth_blockNumber", []interface{}{}, &res); err != nil {
+	if err := e.rpcCall(ctx, "", "eth_blockNumber", []interface{}{}, &res); err != nil {
 		return 0, err
 	}
 	return hexToUint64(res)
@@ -74,7 +106,7 @@ func (e *ETHRPC) GetBlockNumber(ctx context.Context) (uint64, error) {
 
 func (e *ETHRPC) GetTransactionReceipt(ctx context.Context, txHash string) (*entity.Receipt, error) {
 	var raw map[string]interface{}
-	if err := e.rpcCall(ctx, "eth_getTransactionReceipt", []interface{}{txHash}, &raw); err != nil {
+	if err := e.rpcCall(ctx, "", "eth_getTransactionReceipt", []interface{}{txHash}, &raw); err != nil {
 		return nil, err
 	}
 	if raw == nil {
@@ -153,10 +185,14 @@ func (e *ETHRPC) GetTransactionReceipt(ctx context.Context, txHash string) (*ent
 }
 
 // --- low-level JSON-RPC call ---
-func (e *ETHRPC) rpcCall(ctx context.Context, method string, params interface{}, result interface{}) error {
+func (e *ETHRPC) rpcCall(ctx context.Context, chain string, method string, params interface{}, result interface{}) error {
+	url, err := e.getURL(chain)
+	if err != nil {
+		return err
+	}
 	reqBody := map[string]interface{}{"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
 	b, _ := json.Marshal(reqBody)
-	req, err := http.NewRequestWithContext(ctx, "POST", e.url, strings.NewReader(string(b)))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(string(b)))
 	if err != nil {
 		return err
 	}
@@ -197,6 +233,25 @@ func (e *ETHRPC) rpcCall(ctx context.Context, method string, params interface{},
 		return fmt.Errorf("failed decode result: %w; raw=%s", err, string(envelope.Result))
 	}
 	return nil
+}
+
+func (e *ETHRPC) getURL(chain string) (string, error) {
+	if strings.TrimSpace(chain) == "" {
+		return e.defaultURL, nil
+	}
+	key := strings.ToLower(strings.TrimSpace(chain))
+	if url, ok := e.urls[key]; ok && url != "" {
+		return url, nil
+	}
+	if key == "ethereum" {
+		if url, ok := e.urls["eth"]; ok && url != "" {
+			return url, nil
+		}
+	}
+	if e.defaultURL != "" {
+		return e.defaultURL, nil
+	}
+	return "", errors.New("unsupported chain endpoint")
 }
 
 // --- helper parsers ---
@@ -246,12 +301,69 @@ func hexToBytes(hexs string) ([]byte, error) {
 	return hex.DecodeString(s)
 }
 
-// GetLogs is not implemented for this adapter yet.
+// GetLogs executes an eth_getLogs JSON-RPC request using the provided filter.
 func (e *ETHRPC) GetLogs(ctx context.Context, f entity.LogFilter) ([]entity.Log, error) {
-	return nil, fmt.Errorf("unsupported operation: GetLogs not implemented")
+	params := map[string]interface{}{}
+	if f.FromBlock != nil {
+		params["fromBlock"] = fmt.Sprintf("0x%x", *f.FromBlock)
+	}
+	if f.ToBlock != nil {
+		params["toBlock"] = fmt.Sprintf("0x%x", *f.ToBlock)
+	}
+	if len(f.Addresses) > 0 {
+		params["address"] = f.Addresses
+	}
+	if len(f.Topics) > 0 {
+		params["topics"] = f.Topics
+	}
+
+	var rawLogs []map[string]interface{}
+	if err := e.rpcCall(ctx, "", "eth_getLogs", []interface{}{params}, &rawLogs); err != nil {
+		return nil, err
+	}
+
+	logs := make([]entity.Log, 0, len(rawLogs))
+	for _, raw := range rawLogs {
+		var logEntry entity.Log
+		if addr, ok := raw["address"].(string); ok {
+			logEntry.Address = addr
+		}
+		if topics, ok := raw["topics"].([]interface{}); ok {
+			for _, t := range topics {
+				if ts, ok := t.(string); ok {
+					logEntry.Topics = append(logEntry.Topics, ts)
+				}
+			}
+		}
+		if data, ok := raw["data"].(string); ok {
+			b, _ := hexToBytes(data)
+			logEntry.Data = b
+		}
+		if bn, ok := raw["blockNumber"].(string); ok {
+			n, _ := hexToUint64(bn)
+			logEntry.BlockNumber = n
+		}
+		if txh, ok := raw["transactionHash"].(string); ok {
+			logEntry.TxHash = txh
+		}
+		if li, ok := raw["logIndex"].(string); ok {
+			ix, _ := hexToUint64(li)
+			logEntry.LogIndex = uint32(ix)
+		}
+		logs = append(logs, logEntry)
+	}
+	return logs, nil
 }
 
-// EstimateFees is not implemented by this simple RPC adapter and returns an error.
+// EstimateFees attempts a basic fee estimate using eth_gasPrice.
 func (e *ETHRPC) EstimateFees(ctx context.Context, chain string) (*big.Int, *big.Int, error) {
-	return nil, nil, fmt.Errorf("unsupported operation: EstimateFees not implemented")
+	var gasPrice string
+	if err := e.rpcCall(ctx, chain, "eth_gasPrice", []interface{}{}, &gasPrice); err != nil {
+		return nil, nil, err
+	}
+	price, err := hexToBigInt(gasPrice)
+	if err != nil {
+		return nil, nil, err
+	}
+	return price, price, nil
 }

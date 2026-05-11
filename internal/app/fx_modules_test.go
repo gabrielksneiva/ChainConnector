@@ -1,6 +1,7 @@
 package app
 
 import (
+	"ChainConnector/internal/config"
 	"testing"
 
 	"go.uber.org/zap"
@@ -8,7 +9,8 @@ import (
 
 func TestProviderETHRPC(t *testing.T) {
 	logger := zap.NewNop()
-	eth := providerETHRPC(logger)
+	cfg := config.Load()
+	eth := providerETHRPC(logger, cfg)
 	if eth == nil {
 		t.Fatalf("expected non-nil provider result")
 	}

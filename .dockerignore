@@ -1,0 +1,28 @@
+# Ignore Git metadata and local files
+.git
+.gitignore
+.DS_Store
+
+# Environment files
+.env
+.env.*
+
+# Build artifacts
+*.log
+*.tmp
+*.cache
+bin/
+obj/
+
+# Node and frontend artifacts
+frontend/node_modules
+frontend/dist
+frontend/.vite
+frontend/.env*
+
+# Docker artifacts
+docker-compose.override.yml
+
+# Ignore local container and DB state
+postgres-data
+sepolia-data

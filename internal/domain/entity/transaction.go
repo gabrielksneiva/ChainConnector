@@ -26,9 +26,7 @@ type Transaction struct {
 	CreatedAt            time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at" db:"updated_at"`
 
-	// Optional lifecycle timestamps
-	SentAt      *time.Time `json:"sent_at,omitempty" db:"sent_at"`
-	ConfirmedAt *time.Time `json:"confirmed_at,omitempty" db:"confirmed_at"`
+	Receipt *Receipt `json:"receipt,omitempty" db:"receipt"`
 
 	// Failure reason
 	ErrorMessage *string `json:"error_message,omitempty" db:"error_message"`

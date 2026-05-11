@@ -1,11 +1,15 @@
 package http
 
 import (
+	"ChainConnector/internal/adapters/monitor"
+	"ChainConnector/internal/config"
+	"ChainConnector/internal/domain/entity"
 	"ChainConnector/internal/domain/ports"
 	"ChainConnector/internal/domain/service"
 	"bytes"
 	"context"
 	"encoding/json"
+	"math/big"
 	"net/http"
 	"testing"
 
@@ -46,9 +50,7 @@ func TestFiberServer_StartRegistersHooks(t *testing.T) {
 	// Start hook registration relies on fx lifecycle internals and
 	// is exercised indirectly via integration. Skip direct invocation
 	// here to avoid lifecycle initialization complexity in unit tests.
-	logger := zap.NewNop()
-	txSvc := &service.TransactionService{}
-	s := NewFiberServer(logger, txSvc, nil)
+	s := makeTestServer(nil)
 
 	// Use zero-value lifecycle; Start should handle nil Append without panicking.
 	var lc fx.Lifecycle
@@ -56,9 +58,7 @@ func TestFiberServer_StartRegistersHooks(t *testing.T) {
 }
 
 func TestNewFiberServer_ConstructsWithLogger(t *testing.T) {
-	logger := zap.NewNop()
-	txSvc := &service.TransactionService{}
-	s := NewFiberServer(logger, txSvc, nil)
+	s := makeTestServer(nil)
 	if s == nil || s.app == nil {
 		t.Fatalf("expected non-nil FiberServer and app")
 	}
@@ -68,9 +68,7 @@ func TestNewFiberServer_ConstructsWithLogger(t *testing.T) {
 }
 
 func TestFiberServer_HookExecution(t *testing.T) {
-	logger := zap.NewNop()
-	txSvc := &service.TransactionService{}
-	s := NewFiberServer(logger, txSvc, nil)
+	s := makeTestServer(nil)
 	// inject fake app to avoid real network Listen
 	s.app = &fakeApp{}
 
@@ -103,11 +101,55 @@ func (f *fakeBus) Publish(ctx context.Context, topic string, payload interface{}
 func (f *fakeBus) Subscribe(topic string, handler ports.EventHandler) func() { return func() {} }
 func (f *fakeBus) Close() error                                              { return nil }
 
-func TestHandlerTransactionPublishes(t *testing.T) {
+type fakeRepo struct{}
+
+func (f *fakeRepo) Save(ctx context.Context, tx *entity.Transaction) error {
+	return nil
+}
+func (f *fakeRepo) FindByID(ctx context.Context, id string) (*entity.Transaction, error) {
+	return nil, nil
+}
+func (f *fakeRepo) FindByHash(ctx context.Context, hash string) (*entity.Transaction, error) {
+	return nil, nil
+}
+func (f *fakeRepo) UpdateStatus(ctx context.Context, txID string, status entity.TxStatus, updates map[string]interface{}) error {
+	return nil
+}
+func (f *fakeRepo) ListPending(ctx context.Context, limit int) ([]*entity.Transaction, error) {
+	return nil, nil
+}
+
+func (f *fakeRepo) AddInterestAddress(ctx context.Context, address string, chain string) error {
+	return nil
+}
+
+func (f *fakeRepo) GetInterestAddresses(ctx context.Context, chain string) ([]string, error) {
+	return []string{}, nil
+}
+
+func (f *fakeRepo) GetBalance(ctx context.Context, address string, chain string) (*big.Int, error) {
+	return big.NewInt(0), nil
+}
+
+func (f *fakeRepo) UpdateBalance(ctx context.Context, address string, chain string, amount *big.Int) error {
+	return nil
+}
+
+func makeTestServer(bus ports.EventBus) *FiberServer {
 	logger := zap.NewNop()
+	cfg := &config.Config{
+		HTTPAddr: ":3000",
+	}
 	txSvc := &service.TransactionService{}
+	repo := &fakeRepo{}
+	interest := monitor.NewInterestStore()
+	filter := monitor.NewBloomFilterCache()
+	return NewFiberServer(logger, cfg, txSvc, repo, interest, filter, bus)
+}
+
+func TestHandlerTransactionPublishes(t *testing.T) {
 	bus := &fakeBus{}
-	s := NewFiberServer(logger, txSvc, bus)
+	s := makeTestServer(bus)
 	app := s.app.(*fiber.App)
 
 	body := map[string]string{
@@ -138,10 +180,8 @@ func TestHandlerTransactionPublishes(t *testing.T) {
 }
 
 func TestHandlerTransactionInvalidJSON(t *testing.T) {
-	logger := zap.NewNop()
-	txSvc := &service.TransactionService{}
 	bus := &fakeBus{}
-	s := NewFiberServer(logger, txSvc, bus)
+	s := makeTestServer(bus)
 	app := s.app.(*fiber.App)
 
 	req, _ := http.NewRequest("POST", "/transaction", bytes.NewReader([]byte("not json")))
@@ -156,10 +196,8 @@ func TestHandlerTransactionInvalidJSON(t *testing.T) {
 }
 
 func TestHandlerTransactionInvalidGas(t *testing.T) {
-	logger := zap.NewNop()
-	txSvc := &service.TransactionService{}
 	bus := &fakeBus{}
-	s := NewFiberServer(logger, txSvc, bus)
+	s := makeTestServer(bus)
 	app := s.app.(*fiber.App)
 
 	body := map[string]string{
@@ -184,9 +222,7 @@ func TestHandlerTransactionInvalidGas(t *testing.T) {
 }
 
 func TestHandlerHeatlCheckMethod(t *testing.T) {
-	logger := zap.NewNop()
-	txSvc := &service.TransactionService{}
-	s := NewFiberServer(logger, txSvc, nil)
+	s := makeTestServer(nil)
 	app := s.app.(*fiber.App)
 
 	// register a route that uses the method receiver so we invoke handlerHeatlCheck

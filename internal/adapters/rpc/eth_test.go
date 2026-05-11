@@ -76,9 +76,7 @@ func TestRPCMethodsAgainstTestServer(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	eth := NewETHRPC(zap.NewNop(), nil)
-	// override URL to point to our test server
-	eth.url = srv.URL
+	eth := NewETHRPCWithURL(zap.NewNop(), nil, srv.URL)
 
 	// SendRawTransactionHex
 	hash, err := eth.SendRawTransactionHex(context.Background(), "", "0x01")
@@ -133,8 +131,7 @@ func TestRPCErrorEnvelopeAndInvalidJSON(t *testing.T) {
 	}))
 	defer srvErr.Close()
 
-	eth := NewETHRPC(zap.NewNop(), nil)
-	eth.url = srvErr.URL
+	eth := NewETHRPCWithURL(zap.NewNop(), nil, srvErr.URL)
 	if _, err := eth.SendRawTransactionHex(context.Background(), "", "0x01"); err == nil {
 		t.Fatalf("expected error from SendRawTransactionHex when server returns error envelope")
 	}
@@ -146,8 +143,8 @@ func TestRPCErrorEnvelopeAndInvalidJSON(t *testing.T) {
 		}
 	}))
 	defer srvBad.Close()
-	eth.url = srvBad.URL
-	if _, err := eth.GetBalance(context.Background(), "0xaddr"); err == nil {
+	ethBad := NewETHRPCWithURL(zap.NewNop(), nil, srvBad.URL)
+	if _, err := ethBad.GetBalance(context.Background(), "0xaddr"); err == nil {
 		t.Fatalf("expected error from GetBalance when server returns invalid JSON")
 	}
 }
@@ -182,8 +179,7 @@ func TestReceiptParsingWithLogsAndNullReceipt(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	eth := NewETHRPC(zap.NewNop(), nil)
-	eth.url = srv.URL
+	eth := NewETHRPCWithURL(zap.NewNop(), nil, srv.URL)
 	rec, err := eth.GetTransactionReceipt(context.Background(), "0xhash")
 	if err != nil {
 		t.Fatalf("GetTransactionReceipt error: %v", err)
@@ -205,8 +201,8 @@ func TestReceiptParsingWithLogsAndNullReceipt(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{"jsonrpc": "2.0", "id": 1, "result": nil})
 	}))
 	defer srvNull.Close()
-	eth.url = srvNull.URL
-	rec2, err := eth.GetTransactionReceipt(context.Background(), "0xhash")
+	ethNull := NewETHRPCWithURL(zap.NewNop(), nil, srvNull.URL)
+	rec2, err := ethNull.GetTransactionReceipt(context.Background(), "0xhash")
 	if err != nil {
 		t.Fatalf("GetTransactionReceipt error on null: %v", err)
 	}
@@ -227,8 +223,7 @@ func TestSendRawTransactionWrapper(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	eth := NewETHRPC(zap.NewNop(), nil)
-	eth.url = srv.URL
+	eth := NewETHRPCWithURL(zap.NewNop(), nil, srv.URL)
 
 	// call wrapper that accepts bytes
 	h, err := eth.SendRawTransaction(context.Background(), "", []byte{0x01, 0x02})
@@ -240,14 +235,82 @@ func TestSendRawTransactionWrapper(t *testing.T) {
 	}
 }
 
-func TestGetLogsAndEstimateFeesUnsupported(t *testing.T) {
-	eth := NewETHRPC(zap.NewNop(), nil)
-	_, err := eth.GetLogs(context.Background(), entity.LogFilter{})
-	if err == nil {
-		t.Fatalf("expected error from GetLogs")
+func TestETHRPCWithURLsRouteToCorrectChains(t *testing.T) {
+	ethCalled, sepoliaCalled := false, false
+
+	ethSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ethCalled = true
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"jsonrpc": "2.0", "id": 1, "result": "0x111"})
+	}))
+	defer ethSrv.Close()
+
+	sepoliaSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sepoliaCalled = true
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"jsonrpc": "2.0", "id": 1, "result": "0x222"})
+	}))
+	defer sepoliaSrv.Close()
+
+	eth := NewETHRPCWithURLs(zap.NewNop(), nil, map[string]string{
+		"eth":     ethSrv.URL,
+		"sepolia": sepoliaSrv.URL,
+	})
+
+	hashEth, err := eth.SendRawTransactionHex(context.Background(), "eth", "0x01")
+	if err != nil {
+		t.Fatalf("expected eth chain request, got error: %v", err)
 	}
-	_, _, err2 := eth.EstimateFees(context.Background(), "")
-	if err2 == nil {
-		t.Fatalf("expected error from EstimateFees")
+	if hashEth != "0x111" {
+		t.Fatalf("expected eth response 0x111, got %s", hashEth)
+	}
+
+	hashSepolia, err := eth.SendRawTransactionHex(context.Background(), "sepolia", "0x02")
+	if err != nil {
+		t.Fatalf("expected sepolia chain request, got error: %v", err)
+	}
+	if hashSepolia != "0x222" {
+		t.Fatalf("expected sepolia response 0x222, got %s", hashSepolia)
+	}
+
+	if !ethCalled {
+		t.Fatal("expected eth endpoint to be called")
+	}
+	if !sepoliaCalled {
+		t.Fatal("expected sepolia endpoint to be called")
+	}
+}
+
+func TestGetLogsAndEstimateFeesSupported(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]interface{}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		method := req["method"].(string)
+		if method == "eth_getLogs" {
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"jsonrpc": "2.0", "id": 1, "result": []interface{}{}})
+			return
+		}
+		if method == "eth_gasPrice" {
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"jsonrpc": "2.0", "id": 1, "result": "0x1"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"jsonrpc": "2.0", "id": 1, "result": nil})
+	}))
+	defer srv.Close()
+
+	eth := NewETHRPCWithURL(zap.NewNop(), nil, srv.URL)
+
+	logs, err := eth.GetLogs(context.Background(), entity.LogFilter{})
+	if err != nil {
+		t.Fatalf("GetLogs error: %v", err)
+	}
+	if len(logs) != 0 {
+		t.Fatalf("expected no logs, got %d", len(logs))
+	}
+
+	priority, maxFee, err := eth.EstimateFees(context.Background(), "")
+	if err != nil {
+		t.Fatalf("EstimateFees error: %v", err)
+	}
+	if priority.Cmp(big.NewInt(1)) != 0 || maxFee.Cmp(big.NewInt(1)) != 0 {
+		t.Fatalf("unexpected fees: %s %s", priority.String(), maxFee.String())
 	}
 }

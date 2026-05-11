@@ -4,6 +4,7 @@ import (
 	"ChainConnector/internal/domain/ports"
 	"context"
 	"errors"
+	"log"
 	"sync"
 )
 
@@ -66,10 +67,13 @@ func (b *InMemoryBus) Subscribe(topic string, h ports.EventHandler) func() {
 	}
 	b.subs[topic][id] = h
 
+	log.Printf("eventbus: subscribed topic=%s id=%d", topic, id)
+
 	return func() {
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		delete(b.subs[topic], id)
+		log.Printf("eventbus: unsubscribed topic=%s id=%d", topic, id)
 	}
 }
 
@@ -80,6 +84,7 @@ func (b *InMemoryBus) Publish(ctx context.Context, topic string, payload interfa
 	b.mu.RUnlock()
 
 	if handlersMap == nil {
+		log.Printf("eventbus: publish no handlers for topic=%s", topic)
 		return
 	}
 
@@ -94,8 +99,10 @@ func (b *InMemoryBus) Publish(ctx context.Context, topic string, payload interfa
 		select {
 		case b.jobs <- j:
 			// enqueued
+			log.Printf("eventbus: enqueued job for topic=%s", topic)
 		default:
 			// fila cheia: fallback para execução imediata em goroutine (fire-and-forget)
+			log.Printf("eventbus: queue full, executing handler immediately for topic=%s", topic)
 			go func(h ports.EventHandler, ctx context.Context, payload interface{}) {
 				_ = h(ctx, payload)
 			}(h, ctx, payload)
