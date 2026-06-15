@@ -26,3 +26,4 @@ docker-compose.override.yml
 # Ignore local container and DB state
 postgres-data
 sepolia-data
+localstack-data

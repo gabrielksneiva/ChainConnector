@@ -1,10 +1,10 @@
-version: '3.8'
-
 services:
   # Anvil - Local EVM provider compatible with Sepolia
   anvil:
     image: ghcr.io/foundry-rs/foundry:latest
     container_name: chainconnector-anvil
+    profiles:
+      - local-node
     ports:
       - "8545:8545"
     entrypoint:
@@ -66,41 +66,161 @@ services:
         reservations:
           memory: 128M
 
-  # ChainConnector Service
+  # LocalStack - AWS services for local development
+  localstack:
+    image: localstack/localstack:3
+    container_name: chainconnector-localstack
+    environment:
+      SERVICES: sqs
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      SQS_ENDPOINT_STRATEGY: path
+    ports:
+      - "4566:4566"
+    volumes:
+      - localstack-data:/var/lib/localstack
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:4566/_localstack/health >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 10
+    networks:
+      - chainconnector-net
+    restart: unless-stopped
+
+  # Creates the SQS queue used by the API producer and worker consumer
+  localstack-init:
+    image: localstack/localstack:3
+    container_name: chainconnector-localstack-init
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        awslocal --endpoint-url=http://localstack:4566 sqs create-queue
+        --queue-name chainconnector-network-registrations &&
+        awslocal --endpoint-url=http://localstack:4566 sqs create-queue
+        --queue-name chainconnector-block-events
+    environment:
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    depends_on:
+      localstack:
+        condition: service_healthy
+    networks:
+      - chainconnector-net
+    restart: "no"
+
+  # ChainConnector API / SQS producer
   chainconnector:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: chainconnector-service
     environment:
-      # RPC Configuration - points to local Anvil
-      ETH_RPC_URL: http://anvil:8545
-      SEPOLIA_RPC_URL: http://anvil:8545
+      # RPC Configuration - Sepolia public node for local development.
+      # For production-like use, override these with a private provider URL.
+      ETH_RPC_URL: https://ethereum-sepolia-rpc.publicnode.com
+      SEPOLIA_RPC_URL: https://ethereum-sepolia-rpc.publicnode.com
+      ETH_WS_URL: wss://ethereum-sepolia-rpc.publicnode.com
+      SEPOLIA_WS_URL: wss://ethereum-sepolia-rpc.publicnode.com
       
       # Database Configuration
       DATABASE_URL: postgres://user:password@postgres:5432/chainconnector?sslmode=disable
       
       # Server Configuration
-      HTTP_ADDR: 0.0.0.0:3000
-      HTTP_PORT: "3000"
+      HTTP_ADDR: 0.0.0.0:3001
+      HTTP_PORT: "3001"
+      HTTP_ENABLED: "true"
       
       # Monitoring
-      MONITOR_ENABLED: "true"
+      MONITOR_ENABLED: "false"
       MONITOR_INTERVAL_SECONDS: "30"
+
+      # LocalStack / SQS
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      SQS_ENABLED: "true"
+      SQS_CONSUMER_ENABLED: "false"
+      NETWORK_QUEUE_NAME: chainconnector-network-registrations
+      NETWORK_QUEUE_URL: http://localstack:4566/000000000000/chainconnector-network-registrations
+      BLOCK_PRODUCER_ENABLED: "true"
+      BLOCK_CONSUMER_ENABLED: "false"
+      BLOCK_QUEUE_NAME: chainconnector-block-events
+      BLOCK_QUEUE_URL: http://localstack:4566/000000000000/chainconnector-block-events
       
       # Logging
       LOG_LEVEL: info
     ports:
-      - "3000:3000"
+      - "3001:3001"
     depends_on:
-      - anvil
-      - postgres
+      postgres:
+        condition: service_healthy
+      localstack-init:
+        condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health", "--silent", "--show-error"]
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health", "--silent", "--show-error"]
       interval: 10s
       timeout: 5s
       start_period: 20s
       retries: 3
+    networks:
+      - chainconnector-net
+    restart: on-failure:5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # ChainConnector SQS consumer / worker
+  chainconnector-consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chainconnector-consumer
+    environment:
+      # RPC Configuration - Sepolia public node for local development.
+      ETH_RPC_URL: https://ethereum-sepolia-rpc.publicnode.com
+      SEPOLIA_RPC_URL: https://ethereum-sepolia-rpc.publicnode.com
+      ETH_WS_URL: wss://ethereum-sepolia-rpc.publicnode.com
+      SEPOLIA_WS_URL: wss://ethereum-sepolia-rpc.publicnode.com
+
+      # Database Configuration
+      DATABASE_URL: postgres://user:password@postgres:5432/chainconnector?sslmode=disable
+
+      # Disable HTTP and blockchain monitor in the worker
+      HTTP_ENABLED: "false"
+      MONITOR_ENABLED: "false"
+      MONITOR_INTERVAL_SECONDS: "30"
+
+      # LocalStack / SQS
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      SQS_ENABLED: "false"
+      SQS_CONSUMER_ENABLED: "true"
+      NETWORK_QUEUE_NAME: chainconnector-network-registrations
+      NETWORK_QUEUE_URL: http://localstack:4566/000000000000/chainconnector-network-registrations
+      BLOCK_PRODUCER_ENABLED: "false"
+      BLOCK_CONSUMER_ENABLED: "true"
+      BLOCK_QUEUE_NAME: chainconnector-block-events
+      BLOCK_QUEUE_URL: http://localstack:4566/000000000000/chainconnector-block-events
+
+      # Logging
+      LOG_LEVEL: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack-init:
+        condition: service_completed_successfully
+    healthcheck:
+      disable: true
     networks:
       - chainconnector-net
     restart: on-failure:5
@@ -139,6 +259,8 @@ services:
 
 volumes:
   postgres-data:
+    driver: local
+  localstack-data:
     driver: local
 
 networks:

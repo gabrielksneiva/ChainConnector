@@ -1,4 +1,4 @@
-.PHONY: help cover run lint test build docker-build docker-up docker-down docker-logs setup clean
+.PHONY: help cover run lint test integration-test build docker-build docker-up docker-down docker-logs setup clean
 
 help:
 	@echo "ChainConnector - Blockchain RPC Service"
@@ -6,6 +6,7 @@ help:
 	@echo "Available targets:"
 	@echo "  help              - Show this help message"
 	@echo "  test              - Run all tests"
+	@echo "  integration-test  - Run Docker-backed integration tests"
 	@echo "  cover             - Run tests with coverage report"
 	@echo "  run               - Run service locally (requires PostgreSQL)"
 	@echo "  build             - Build the service binary"
@@ -28,6 +29,9 @@ help:
 test:
 	go test ./... -v -count=1
 .PHONY: test
+
+integration-test:
+	CHAINCONNECTOR_INTEGRATION=1 go test -tags=integration ./test/integration -v -count=1
 
 cover:
 	go test ./... -v -count=1 -covermode=atomic -coverprofile=coverage.out && go tool cover -func=coverage.out && rm coverage.out

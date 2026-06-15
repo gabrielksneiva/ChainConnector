@@ -37,6 +37,56 @@ docker-compose up -d --build
 
 This repository includes a local Sepolia-compatible node powered by Anvil inside `docker-compose.yml`. The backend is configured to use `SEPOLIA_RPC_URL` and `ETH_RPC_URL` against the local Anvil node for development.
 
+The Compose stack also includes LocalStack with SQS:
+
+- `localstack` emulates AWS SQS locally on `http://localhost:4566`.
+- `localstack-init` creates the `chainconnector-network-registrations` and `chainconnector-block-events` queues.
+- `chainconnector` runs the HTTP API, produces network-registration messages, and subscribes to new blocks over WebSocket.
+- `chainconnector-consumer` consumes network-registration messages and block events. For each block event, it calls `eth_getBlockByNumber` and stores transactions whose `from` or `to` address matches a wallet registered in PostgreSQL.
+
+Active block monitoring uses these local defaults:
+
+- HTTP RPC: `http://anvil:8545`
+- WebSocket RPC: `ws://anvil:8545`
+- Block queue: `chainconnector-block-events`
+- Producer enabled in the API container with `BLOCK_PRODUCER_ENABLED=true`
+- Consumer enabled in the worker container with `BLOCK_CONSUMER_ENABLED=true`
+
+Register a network through the API:
+
+```bash
+curl -X POST http://localhost:3001/networks \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "sepolia",
+    "chain_id": 11155111,
+    "rpc_url": "http://anvil:8545",
+    "currency_symbol": "ETH",
+    "explorer_url": "https://sepolia.etherscan.io"
+  }'
+```
+
+List persisted networks after the consumer processes the queue:
+
+```bash
+curl http://localhost:3001/networks
+```
+
+Run the block-monitor integration test against the local Docker stack:
+
+```bash
+docker compose up -d --build
+$env:CHAINCONNECTOR_INTEGRATION="1"; go test -tags=integration ./test/integration -v
+```
+
+On Unix-like shells:
+
+```bash
+CHAINCONNECTOR_INTEGRATION=1 go test -tags=integration ./test/integration -v
+```
+
+This test generates a wallet, imports it through the API, sends an Anvil transaction to that wallet, waits for the receipt, and verifies that the block consumer captured the transaction in PostgreSQL.
+
 Alternatively, to connect against a real Sepolia client, use:
 
 ```bash
@@ -57,7 +107,7 @@ npm install
 npm run dev
 ```
 
-The frontend will be available at `http://localhost:5173` with API proxy to `http://localhost:3000`.
+The frontend will be available at `http://localhost:5173` with API proxy to `http://localhost:3001`.
 
 ### Production with Docker
 
@@ -71,8 +121,10 @@ Frontend available at `http://localhost:8080`, API proxy configured automaticall
 
 - **Transaction Management**: Create, list, and monitor transaction status
 - **Balance Control**: Query and update offchain balances
+- **Network Management**: Register networks through the LocalStack/SQS producer-consumer flow
+- **Wallet Monitoring**: Registered wallets are automatically checked by the block consumer
 - **Address Monitoring**: Register interests and view blockchain logs
-- **Real-time Updates**: Automatic polling for status changes
+- **Block Events**: WebSocket producer publishes new block events; worker consumes blocks by RPC
 
 ### Compatibility Notes
 
@@ -95,8 +147,10 @@ docker build -t chainconnector-frontend ./frontend
 	- [internal/app/fx_modules.go](internal/app/fx_modules.go)
 - `internal/adapters` — external adapters (HTTP server, persistence, RPC).
 	- HTTP server: [internal/adapters/http/server.go](internal/adapters/http/server.go)
+	- LocalStack/SQS queue: [internal/adapters/sqsqueue/network_queue.go](internal/adapters/sqsqueue/network_queue.go)
 - `internal/domain` — core domain logic, entities and ports.
 	- Transaction service: [internal/domain/service/transaction_service.go](internal/domain/service/transaction_service.go)
+	- Network service: [internal/domain/service/network_service.go](internal/domain/service/network_service.go)
 	- Entities (status, transaction): [internal/domain/entity/status.go](internal/domain/entity/status.go) and [internal/domain/entity/transaction.go](internal/domain/entity/transaction.go)
 	- Ports: [internal/domain/ports/tx_repository_port.go](internal/domain/ports/tx_repository_port.go)
 - `migrations/` — database migration files.

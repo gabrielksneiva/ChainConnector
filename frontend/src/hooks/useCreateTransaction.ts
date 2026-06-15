@@ -11,7 +11,7 @@ export const useCreateTransaction = () => {
     setError(null);
     try {
       const transaction = await apiCreateTransaction(data);
-      return transaction;
+      return typeof transaction === 'string' ? null : transaction;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
       return null;

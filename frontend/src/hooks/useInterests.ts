@@ -10,7 +10,7 @@ export const useInterests = (pollInterval: number = 10000) => {
   const fetchInterests = async () => {
     try {
       const data = await getInterests();
-      setInterests(data);
+      setInterests(data ? [data] : []);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');

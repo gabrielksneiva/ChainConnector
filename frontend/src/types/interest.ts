@@ -1,8 +1,9 @@
 export interface Interest {
   id?: string;
   addresses: string[];
-  topics: string[];
+  topics: string[][];
   tx_hashes: string[];
+  chain?: string;
 }
 
 export interface LogEntry {

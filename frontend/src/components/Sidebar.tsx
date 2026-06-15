@@ -6,7 +6,13 @@ interface SidebarProps {
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ activeSection, onSectionChange }) => {
-  const sections = ['transactions', 'balances', 'monitoring']
+  const sectionLabels: Record<string, string> = {
+    transactions: 'Transações',
+    balances: 'Saldos',
+    wallets: 'Carteiras',
+    monitoring: 'Monitoramento',
+  }
+  const sections = Object.keys(sectionLabels)
 
   return (
     <aside className="sidebar">

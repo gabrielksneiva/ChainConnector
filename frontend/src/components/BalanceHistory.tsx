@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useBalanceHistory } from '../hooks/useBalanceHistory';
 
 const BalanceHistory: React.FC = () => {
@@ -35,7 +35,7 @@ const BalanceHistory: React.FC = () => {
         </button>
       </form>
       {error && <p className="text-red-500">{error}</p>}
-      {history.length > 0 && (
+      {Array.isArray(history) && history.length > 0 && (
         <ul className="space-y-2">
           {history.map((item, index) => (
             <li key={index} className="border p-2">

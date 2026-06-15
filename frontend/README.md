@@ -84,7 +84,7 @@ O frontend estará disponível em `http://localhost:8080`.
 
 ## Integração com Backend
 
-O Nginx está configurado para proxy requests `/api/*` para o serviço backend em `chainconnector:3000`.
+O Nginx está configurado para proxy requests `/api/*` para o serviço backend em `chainconnector:3001`.
 
 ## Notas
 

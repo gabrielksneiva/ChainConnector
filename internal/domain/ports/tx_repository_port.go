@@ -12,6 +12,7 @@ type TxRepositoryPort interface {
 	FindByHash(ctx context.Context, hash string) (*entity.Transaction, error)
 	UpdateStatus(ctx context.Context, txID string, status entity.TxStatus, updates map[string]interface{}) error
 	ListPending(ctx context.Context, limit int) ([]*entity.Transaction, error)
+	ListTransactions(ctx context.Context, limit int) ([]*entity.Transaction, error)
 
 	// Balance management
 	GetBalance(ctx context.Context, address string, chain string) (*big.Int, error)

@@ -10,7 +10,7 @@ export const useBalanceUpdate = () => {
     setLoading(true);
     setError(null);
     try {
-      await updateBalance(address, data);
+      await updateBalance(address, data.amount, data.chain);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {

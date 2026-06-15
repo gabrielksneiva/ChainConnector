@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { LogEntry } from '../types/log';
 import { getLogs } from '../services/api';
 
@@ -13,23 +13,23 @@ export const useLogs = (filters: LogFilters, pollInterval: number = 5000) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchLogs = async () => {
+  const fetchLogs = useCallback(async () => {
     try {
       const data = await getLogs(filters);
-      setLogs(data);
+      setLogs(Array.isArray(data) ? data : []);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setLoading(false);
     }
-  };
+  }, [filters]);
 
   useEffect(() => {
     fetchLogs();
     const interval = setInterval(fetchLogs, pollInterval);
     return () => clearInterval(interval);
-  }, [filters, pollInterval]);
+  }, [fetchLogs, pollInterval]);
 
   return { logs, loading, error, refetch: fetchLogs };
 };

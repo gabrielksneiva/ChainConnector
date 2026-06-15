@@ -6,9 +6,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies with ci for reproducibility
-RUN npm ci --only=production && \
-    npm ci --only=dev && \
+# Install dependencies from the lockfile for reproducible builds
+RUN npm ci && \
     npm cache clean --force
 
 # Copy source code
@@ -32,9 +31,14 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 # Copy built application from build stage
 COPY --from=build /app/dist /usr/share/nginx/html
 
-# Fix permissions for nginx user
+# Fix permissions for nginx user and run as non-root
 RUN mkdir -p /var/run/nginx /var/cache/nginx && \
     chown -R nginx:nginx /var/run/nginx /var/cache/nginx /var/log/nginx /usr/share/nginx/html
+
+# Replace default nginx main config to use a rootless PID path
+COPY nginx.main.conf /etc/nginx/nginx.conf
+
+USER nginx
 
 EXPOSE 80
 

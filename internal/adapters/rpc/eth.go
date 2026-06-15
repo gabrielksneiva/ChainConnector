@@ -104,6 +104,91 @@ func (e *ETHRPC) GetBlockNumber(ctx context.Context) (uint64, error) {
 	return hexToUint64(res)
 }
 
+func (e *ETHRPC) GetBlockByNumber(ctx context.Context, chain string, number uint64) (*entity.Block, error) {
+	var raw map[string]interface{}
+	if err := e.rpcCall(ctx, chain, "eth_getBlockByNumber", []interface{}{fmt.Sprintf("0x%x", number), true}, &raw); err != nil {
+		return nil, err
+	}
+	if raw == nil {
+		return nil, nil
+	}
+
+	block := &entity.Block{Chain: strings.ToLower(strings.TrimSpace(chain))}
+	if block.Chain == "" {
+		block.Chain = "sepolia"
+	}
+	if value, ok := raw["number"].(string); ok {
+		n, err := hexToUint64(value)
+		if err != nil {
+			return nil, fmt.Errorf("decode block number: %w", err)
+		}
+		block.Number = n
+	}
+	if value, ok := raw["hash"].(string); ok {
+		block.Hash = value
+	}
+	if value, ok := raw["parentHash"].(string); ok {
+		block.ParentHash = value
+	}
+	if txs, ok := raw["transactions"].([]interface{}); ok {
+		block.Transactions = make([]entity.BlockTransaction, 0, len(txs))
+		for _, rawTx := range txs {
+			txMap, ok := rawTx.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			tx, err := parseBlockTransaction(txMap)
+			if err != nil {
+				return nil, err
+			}
+			block.Transactions = append(block.Transactions, tx)
+		}
+	}
+	return block, nil
+}
+
+func parseBlockTransaction(raw map[string]interface{}) (entity.BlockTransaction, error) {
+	var tx entity.BlockTransaction
+	if value, ok := raw["hash"].(string); ok {
+		tx.Hash = value
+	}
+	if value, ok := raw["from"].(string); ok {
+		tx.From = value
+	}
+	if value, ok := raw["to"].(string); ok && value != "" {
+		tx.To = value
+	}
+	if value, ok := raw["value"].(string); ok {
+		parsed, err := hexToBigInt(value)
+		if err != nil {
+			return tx, fmt.Errorf("decode tx value for %s: %w", tx.Hash, err)
+		}
+		tx.Value = parsed
+	}
+	if value, ok := raw["gas"].(string); ok {
+		parsed, err := hexToUint64(value)
+		if err != nil {
+			return tx, fmt.Errorf("decode tx gas for %s: %w", tx.Hash, err)
+		}
+		tx.Gas = parsed
+	}
+	if value, ok := raw["gasPrice"].(string); ok {
+		parsed, err := hexToBigInt(value)
+		if err != nil {
+			return tx, fmt.Errorf("decode tx gas price for %s: %w", tx.Hash, err)
+		}
+		tx.GasPrice = parsed
+	}
+	if value, ok := raw["nonce"].(string); ok {
+		parsed, err := hexToUint64(value)
+		if err != nil {
+			return tx, fmt.Errorf("decode tx nonce for %s: %w", tx.Hash, err)
+		}
+		tx.Nonce = parsed
+	}
+	return tx, nil
+}
+
 func (e *ETHRPC) GetTransactionReceipt(ctx context.Context, txHash string) (*entity.Receipt, error) {
 	var raw map[string]interface{}
 	if err := e.rpcCall(ctx, "", "eth_getTransactionReceipt", []interface{}{txHash}, &raw); err != nil {
@@ -366,4 +451,29 @@ func (e *ETHRPC) EstimateFees(ctx context.Context, chain string) (*big.Int, *big
 		return nil, nil, err
 	}
 	return price, price, nil
+}
+
+func (e *ETHRPC) EstimateGas(ctx context.Context, chain string, from string, to string, value *big.Int, data []byte) (uint64, error) {
+	call := map[string]string{
+		"from": strings.TrimSpace(from),
+		"to":   strings.TrimSpace(to),
+	}
+	if value != nil && value.Sign() > 0 {
+		call["value"] = bigIntToHex(value)
+	}
+	if len(data) > 0 {
+		call["data"] = "0x" + hex.EncodeToString(data)
+	}
+	var gasHex string
+	if err := e.rpcCall(ctx, chain, "eth_estimateGas", []interface{}{call}, &gasHex); err != nil {
+		return 0, err
+	}
+	return hexToUint64(gasHex)
+}
+
+func bigIntToHex(value *big.Int) string {
+	if value == nil {
+		return "0x0"
+	}
+	return "0x" + value.Text(16)
 }

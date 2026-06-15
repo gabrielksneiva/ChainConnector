@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Transaction } from '../types/transaction';
-import { getPendingTransactions } from '../services/api';
+import { listPendingTransactions } from '../services/api';
 
 export const useTransactions = (pollInterval: number = 5000) => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -9,8 +9,8 @@ export const useTransactions = (pollInterval: number = 5000) => {
 
   const fetchTransactions = async () => {
     try {
-      const data = await getPendingTransactions();
-      setTransactions(data);
+      const data = await listPendingTransactions();
+      setTransactions(Array.isArray(data) ? data : []);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');

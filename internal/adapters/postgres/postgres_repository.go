@@ -23,8 +23,10 @@ type PostgresTxRepository struct {
 }
 
 var _ ports.TxRepositoryPort = (*PostgresTxRepository)(nil)
+var _ ports.WalletRepositoryPort = (*PostgresTxRepository)(nil)
+var _ ports.NetworkRepositoryPort = (*PostgresTxRepository)(nil)
 
-func NewPostgresTxRepository(dsn string, logger *zap.Logger) (ports.TxRepositoryPort, error) {
+func NewPostgresTxRepository(dsn string, migrationsDir string, logger *zap.Logger) (*PostgresTxRepository, error) {
 	if dsn == "" {
 		return nil, errors.New("missing DATABASE_URL")
 	}
@@ -38,6 +40,10 @@ func NewPostgresTxRepository(dsn string, logger *zap.Logger) (ports.TxRepository
 	db.SetConnMaxLifetime(15 * time.Minute)
 
 	if err := db.Ping(); err != nil {
+		return nil, err
+	}
+
+	if err := RunMigrations(context.Background(), db, migrationsDir, logger); err != nil {
 		return nil, err
 	}
 
@@ -160,7 +166,31 @@ func (r *PostgresTxRepository) ListPending(ctx context.Context, limit int) ([]*e
 	}
 	defer rows.Close()
 
-	var result []*entity.Transaction
+	result := make([]*entity.Transaction, 0)
+	for rows.Next() {
+		tx, err := r.scanRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, tx)
+	}
+	return result, rows.Err()
+}
+
+func (r *PostgresTxRepository) ListTransactions(ctx context.Context, limit int) ([]*entity.Transaction, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	query := `SELECT id, tx_hash, chain_id, from_address, to_address, value, nonce,
+        gas_limit, gas_price, raw_tx, receipt, status, created_at, updated_at
+      FROM transactions ORDER BY created_at DESC LIMIT $1`
+	rows, err := r.db.QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]*entity.Transaction, 0)
 	for rows.Next() {
 		tx, err := r.scanRow(rows)
 		if err != nil {
@@ -277,6 +307,91 @@ func (r *PostgresTxRepository) GetInterestAddresses(ctx context.Context, chain s
 	return addresses, rows.Err()
 }
 
+func (r *PostgresTxRepository) SaveWallet(ctx context.Context, wallet *entity.Wallet) error {
+	if wallet == nil || wallet.Address == "" {
+		return errors.New("invalid wallet")
+	}
+	query := `INSERT INTO wallets (id, address, chain, private_key, created_at, updated_at)
+	          VALUES ($1, $2, $3, $4, $5, $6)
+	          ON CONFLICT (address) DO UPDATE SET
+	            chain = EXCLUDED.chain,
+	            private_key = EXCLUDED.private_key,
+	            updated_at = EXCLUDED.updated_at`
+	_, err := r.db.ExecContext(ctx, query,
+		wallet.ID,
+		wallet.Address,
+		wallet.Chain,
+		wallet.PrivateKey,
+		wallet.CreatedAt,
+		wallet.UpdatedAt,
+	)
+	return err
+}
+
+func (r *PostgresTxRepository) FindWalletByID(ctx context.Context, id string) (*entity.Wallet, error) {
+	query := `SELECT id, address, chain, private_key, created_at, updated_at FROM wallets WHERE id = $1`
+	row := r.db.QueryRowContext(ctx, query, id)
+	var wallet entity.Wallet
+	if err := row.Scan(&wallet.ID, &wallet.Address, &wallet.Chain, &wallet.PrivateKey, &wallet.CreatedAt, &wallet.UpdatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &wallet, nil
+}
+
+func (r *PostgresTxRepository) FindWalletByAddress(ctx context.Context, address string) (*entity.Wallet, error) {
+	query := `SELECT id, address, chain, private_key, created_at, updated_at FROM wallets WHERE address = $1`
+	row := r.db.QueryRowContext(ctx, query, address)
+	var wallet entity.Wallet
+	if err := row.Scan(&wallet.ID, &wallet.Address, &wallet.Chain, &wallet.PrivateKey, &wallet.CreatedAt, &wallet.UpdatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &wallet, nil
+}
+
+func (r *PostgresTxRepository) ListWallets(ctx context.Context, chain string) ([]*entity.Wallet, error) {
+	query := `SELECT id, address, chain, created_at, updated_at FROM wallets WHERE chain = $1 ORDER BY created_at DESC`
+	rows, err := r.db.QueryContext(ctx, query, chain)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	wallets := make([]*entity.Wallet, 0)
+	for rows.Next() {
+		var wallet entity.Wallet
+		if err := rows.Scan(&wallet.ID, &wallet.Address, &wallet.Chain, &wallet.CreatedAt, &wallet.UpdatedAt); err != nil {
+			return nil, err
+		}
+		wallets = append(wallets, &wallet)
+	}
+	return wallets, rows.Err()
+}
+
+func (r *PostgresTxRepository) ListAllWallets(ctx context.Context) ([]*entity.Wallet, error) {
+	query := `SELECT id, address, chain, created_at, updated_at FROM wallets ORDER BY created_at DESC`
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	wallets := make([]*entity.Wallet, 0)
+	for rows.Next() {
+		var wallet entity.Wallet
+		if err := rows.Scan(&wallet.ID, &wallet.Address, &wallet.Chain, &wallet.CreatedAt, &wallet.UpdatedAt); err != nil {
+			return nil, err
+		}
+		wallets = append(wallets, &wallet)
+	}
+	return wallets, rows.Err()
+}
+
 // GetBalance returns the current balance for an address on a chain
 func (r *PostgresTxRepository) GetBalance(ctx context.Context, address string, chain string) (*big.Int, error) {
 	query := `SELECT balance FROM user_balances WHERE address = $1 AND chain = $2`
@@ -311,4 +426,106 @@ func (r *PostgresTxRepository) UpdateBalance(ctx context.Context, address string
 	            updated_at = EXCLUDED.updated_at`
 	_, err := r.db.ExecContext(ctx, query, address, chain, amount.String(), time.Now().UTC())
 	return err
+}
+
+func (r *PostgresTxRepository) SaveNetwork(ctx context.Context, network *entity.Network) error {
+	if network == nil || network.ID == "" || network.Name == "" || network.ChainID <= 0 {
+		return errors.New("invalid network")
+	}
+
+	query := `INSERT INTO networks (
+	    id, name, chain_id, rpc_url, currency_symbol, explorer_url, enabled, created_at, updated_at
+	  ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+	  ON CONFLICT (chain_id) DO UPDATE SET
+	    id = EXCLUDED.id,
+	    name = EXCLUDED.name,
+	    rpc_url = EXCLUDED.rpc_url,
+	    currency_symbol = EXCLUDED.currency_symbol,
+	    explorer_url = EXCLUDED.explorer_url,
+	    enabled = EXCLUDED.enabled,
+	    updated_at = EXCLUDED.updated_at`
+	_, err := r.db.ExecContext(ctx, query,
+		network.ID,
+		network.Name,
+		network.ChainID,
+		nullString(network.RPCURL),
+		nullString(network.CurrencySymbol),
+		nullString(network.ExplorerURL),
+		network.Enabled,
+		network.CreatedAt,
+		network.UpdatedAt,
+	)
+	return err
+}
+
+func (r *PostgresTxRepository) FindNetworkByID(ctx context.Context, id string) (*entity.Network, error) {
+	query := `SELECT id, name, chain_id, rpc_url, currency_symbol, explorer_url, enabled, created_at, updated_at
+	  FROM networks WHERE id = $1`
+	row := r.db.QueryRowContext(ctx, query, id)
+	return scanNetwork(row)
+}
+
+func (r *PostgresTxRepository) ListNetworks(ctx context.Context) ([]*entity.Network, error) {
+	query := `SELECT id, name, chain_id, rpc_url, currency_symbol, explorer_url, enabled, created_at, updated_at
+	  FROM networks ORDER BY name ASC`
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	networks := make([]*entity.Network, 0)
+	for rows.Next() {
+		network, err := scanNetwork(rows)
+		if err != nil {
+			return nil, err
+		}
+		networks = append(networks, network)
+	}
+	return networks, rows.Err()
+}
+
+func scanNetwork(scanner interface {
+	Scan(dest ...interface{}) error
+}) (*entity.Network, error) {
+	var (
+		network        entity.Network
+		rpcURL         sql.NullString
+		currencySymbol sql.NullString
+		explorerURL    sql.NullString
+	)
+	err := scanner.Scan(
+		&network.ID,
+		&network.Name,
+		&network.ChainID,
+		&rpcURL,
+		&currencySymbol,
+		&explorerURL,
+		&network.Enabled,
+		&network.CreatedAt,
+		&network.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if rpcURL.Valid {
+		network.RPCURL = rpcURL.String
+	}
+	if currencySymbol.Valid {
+		network.CurrencySymbol = currencySymbol.String
+	}
+	if explorerURL.Valid {
+		network.ExplorerURL = explorerURL.String
+	}
+	return &network, nil
+}
+
+func nullString(value string) interface{} {
+	if value == "" {
+		return nil
+	}
+	return value
 }

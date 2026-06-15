@@ -23,10 +23,16 @@ type BlockchainPort interface {
 	// GetBlockNumber returns the latest block number.
 	GetBlockNumber(ctx context.Context) (uint64, error)
 
+	// GetBlockByNumber returns a block with full transactions.
+	GetBlockByNumber(ctx context.Context, chain string, number uint64) (*entity.Block, error)
+
 	// EstimateFees returns an estimated priority fee (tip) and max fee (fee cap) in wei for
 	// EIP-1559 transactions. The `chain` parameter may be used by implementations that route
 	// multiple chains. If unsupported, return an error (e.g., ErrUnsupported).
 	EstimateFees(ctx context.Context, chain string) (*big.Int, *big.Int, error)
+
+	// EstimateGas estimates the gas limit for a native value transfer or contract call.
+	EstimateGas(ctx context.Context, chain string, from string, to string, value *big.Int, data []byte) (uint64, error)
 
 	// SendRawTransaction sends a fully-signed transaction bytes to the node for the given chain.
 	// Returns the transaction hash (hex, with 0x) or an error.

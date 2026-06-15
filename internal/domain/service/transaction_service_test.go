@@ -35,6 +35,9 @@ func (r *repoErr) FindByHash(ctx context.Context, hash string) (*entity.Transact
 func (r *repoErr) ListPending(ctx context.Context, limit int) ([]*entity.Transaction, error) {
 	return nil, nil
 }
+func (r *repoErr) ListTransactions(ctx context.Context, limit int) ([]*entity.Transaction, error) {
+	return nil, nil
+}
 
 func (r *repoErr) AddInterestAddress(ctx context.Context, address string, chain string) error {
 	return nil
@@ -101,6 +104,17 @@ func (m *mockRepo) ListPending(ctx context.Context, limit int) ([]*entity.Transa
 	return out, nil
 }
 
+func (m *mockRepo) ListTransactions(ctx context.Context, limit int) ([]*entity.Transaction, error) {
+	var out []*entity.Transaction
+	for _, tx := range m.byID {
+		out = append(out, tx)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
 func (m *mockRepo) AddInterestAddress(ctx context.Context, address string, chain string) error {
 	return nil
 }
@@ -118,7 +132,7 @@ func (m *mockRepo) UpdateBalance(ctx context.Context, address string, chain stri
 }
 
 func TestCreateTransaction_nil(t *testing.T) {
-	svc := NewTransactionService(&mockRepo{}, zap.NewNop())
+	svc := NewTransactionService(&mockRepo{}, nil, zap.NewNop())
 	if err := svc.CreateTransaction(context.Background(), nil); err == nil {
 		t.Fatal("expected error for nil tx")
 	}
@@ -126,7 +140,7 @@ func TestCreateTransaction_nil(t *testing.T) {
 
 func TestCreateTransaction_success(t *testing.T) {
 	repo := &mockRepo{byID: map[string]*entity.Transaction{}}
-	svc := NewTransactionService(repo, zap.NewNop())
+	svc := NewTransactionService(repo, nil, zap.NewNop())
 
 	amount := big.NewInt(1000)
 	gasPrice := big.NewInt(100)
@@ -152,7 +166,7 @@ func TestCreateTransaction_success(t *testing.T) {
 }
 
 func TestCreateTransaction_SaveError(t *testing.T) {
-	svc := NewTransactionService(&repoErr{}, zap.NewNop())
+	svc := NewTransactionService(&repoErr{}, nil, zap.NewNop())
 	tx := &entity.Transaction{ID: "t2"}
 	if err := svc.CreateTransaction(context.Background(), tx); err == nil {
 		t.Fatalf("expected save error propagated")

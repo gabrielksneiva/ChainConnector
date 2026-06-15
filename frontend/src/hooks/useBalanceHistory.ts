@@ -12,7 +12,7 @@ export const useBalanceHistory = () => {
     setError(null);
     try {
       const data = await getBalanceHistory(address);
-      setHistory(data);
+      setHistory(Array.isArray(data) ? data : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {

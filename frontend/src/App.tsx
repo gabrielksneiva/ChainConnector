@@ -1,12 +1,12 @@
-import { useState } from 'react'
 import './App.css'
-import Dashboard from './pages/Dashboard'
+import Dashboard from './pages/Dashboard.tsx'
+import ErrorBoundary from './components/ErrorBoundary'
 
 function App() {
   return (
-    <>
+    <ErrorBoundary>
       <Dashboard />
-    </>
+    </ErrorBoundary>
   )
 }
 

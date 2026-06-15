@@ -11,6 +11,6 @@ export interface BalanceUpdateRequest {
 
 export interface BalanceHistoryItem {
   amount: string;
-  chain: string;
-  timestamp: string;
+  chain?: string;
+  timestamp?: string;
 }

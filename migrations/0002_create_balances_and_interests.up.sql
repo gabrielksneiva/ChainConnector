@@ -6,19 +6,21 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- User balances table for offchain balance tracking
 CREATE TABLE IF NOT EXISTS user_balances (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  address text NOT NULL UNIQUE,
+  address text NOT NULL,
   chain text NOT NULL DEFAULT 'sepolia',
   balance numeric NOT NULL DEFAULT 0,
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(address, chain)
 );
 
 -- Interest addresses table for monitoring
 CREATE TABLE IF NOT EXISTS interest_addresses (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  address text NOT NULL UNIQUE,
+  address text NOT NULL,
   chain text NOT NULL DEFAULT 'sepolia',
-  created_at timestamptz NOT NULL DEFAULT now()
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(address, chain)
 );
 
 -- Indexes
